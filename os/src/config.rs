@@ -21,3 +21,5 @@ pub const MAX_SYSCALL_NUM: usize = 500;
 pub const CLOCK_FREQ: usize = 12500000;
 /// the physical memory end
 pub const MEMORY_END: usize = 0x88000000;
+/// TaskControlBlock 中最多储存的 syscall 种类数
+pub const MAX_SYSCALLINFO_NUM: usize = 6;
