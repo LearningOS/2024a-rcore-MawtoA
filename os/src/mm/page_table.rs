@@ -158,6 +158,15 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
+    /// 判断内存是否已被映射
+    pub fn is_mapped(&self, vpn: VirtPageNum) -> bool {
+        let pte = self.find_pte(vpn);
+        if let None = pte {
+            false
+        } else {
+            pte.unwrap().is_valid()
+        }
+    }
 }
 
 /// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
@@ -212,4 +221,9 @@ pub fn translated_refmut<T>(token: usize, ptr: *mut T) -> &'static mut T {
         .translate_va(VirtAddr::from(va))
         .unwrap()
         .get_mut()
+}
+
+/// 判断内存是否已被映射
+pub fn is_mapped(token: usize, vpn: VirtPageNum) -> bool {
+    PageTable::from_token(token).is_mapped(vpn)
 }
