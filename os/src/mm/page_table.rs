@@ -1,6 +1,6 @@
 //! Implementation of [`PageTableEntry`] and [`PageTable`].
 
-use super::{frame_alloc, FrameTracker, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
+use super::{frame_alloc, FrameTracker, PhysAddr, PhysPageNum, StepByOne, VirtAddr, VirtPageNum};
 use alloc::vec;
 use alloc::vec::Vec;
 use bitflags::*;
@@ -147,6 +147,15 @@ impl PageTable {
     pub fn token(&self) -> usize {
         8usize << 60 | self.root_ppn.0
     }
+    /// 判断内存是否已被映射
+    pub fn is_mapped(&self, vpn: VirtPageNum) -> bool {
+        let pte = self.find_pte(vpn);
+        if let None = pte {
+            false
+        } else {
+            pte.unwrap().is_valid()
+        }
+    }
 }
 
 /// Translate&Copy a ptr[u8] array with LENGTH len to a mutable u8 Vec through page table
@@ -170,4 +179,20 @@ pub fn translated_byte_buffer(token: usize, ptr: *const u8, len: usize) -> Vec<&
         start = end_va.into();
     }
     v
+}
+
+/// Translate&Copy a mutable reference through page table
+pub fn translate_mut<T>(token: usize, ptr: *const T) -> &'static mut T {
+    let page_table = PageTable::from_token(token);
+    let va = VirtAddr::from(ptr as usize);
+    let vpn = va.floor();
+    let offset = usize::from(va) - usize::from(VirtAddr::from(vpn));
+    let ppn = page_table.translate(vpn).unwrap().ppn();
+    let pa = PhysAddr::from(usize::from(PhysAddr::from(ppn)) + offset);
+    pa.get_mut()
+}
+
+/// 判断内存是否已被映射
+pub fn is_mapped(token: usize, vpn: VirtPageNum) -> bool {
+    PageTable::from_token(token).is_mapped(vpn)
 }

@@ -1,10 +1,25 @@
 //! Types related to task management
+use alloc::vec::Vec;
+
 use super::TaskContext;
 use crate::config::TRAP_CONTEXT_BASE;
 use crate::mm::{
     kernel_stack_position, MapPermission, MemorySet, PhysPageNum, VirtAddr, KERNEL_SPACE,
 };
 use crate::trap::{trap_handler, TrapContext};
+
+/// 系统调用记录。
+///
+/// 使用结构体短数组的想法和结构体成员的设计受到
+/// [《rCore-Tutorial-Book 第三版》](https://rcore-os.cn/rCore-Tutorial-Book-v3/index.html)
+/// 的启发。
+#[derive(Copy, Clone)]
+pub struct SyscallInfo {
+    /// 调用的 syscall id
+    pub id: usize,
+    /// 总调用次数
+    pub times: u32,
+}
 
 /// The task control block (TCB) of a task.
 pub struct TaskControlBlock {
@@ -28,6 +43,11 @@ pub struct TaskControlBlock {
 
     /// Program break
     pub program_brk: usize,
+
+    /// 任务首次运行的时间
+    pub task_launch_time: usize,
+    /// syscall 调用计数
+    pub task_syscall_times: Vec<SyscallInfo>,
 }
 
 impl TaskControlBlock {
@@ -63,6 +83,8 @@ impl TaskControlBlock {
             base_size: user_sp,
             heap_bottom: user_sp,
             program_brk: user_sp,
+            task_launch_time: 0,
+            task_syscall_times: Vec::new(),
         };
         // prepare TrapContext in user space
         let trap_cx = task_control_block.get_trap_cx();

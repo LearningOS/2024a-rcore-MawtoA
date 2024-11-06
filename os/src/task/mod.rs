@@ -14,12 +14,16 @@ mod switch;
 #[allow(clippy::module_inception)]
 mod task;
 
+use crate::config::{MAX_SYSCALL_NUM, PAGE_SIZE};
 use crate::loader::{get_app_data, get_num_app};
+use crate::mm::{is_mapped, MapPermission, VirtAddr, VirtPageNum};
 use crate::sync::UPSafeCell;
+use crate::timer::get_time_ms;
 use crate::trap::TrapContext;
 use alloc::vec::Vec;
 use lazy_static::*;
 use switch::__switch;
+use task::SyscallInfo;
 pub use task::{TaskControlBlock, TaskStatus};
 
 pub use context::TaskContext;
@@ -79,6 +83,9 @@ impl TaskManager {
         let mut inner = self.inner.exclusive_access();
         let next_task = &mut inner.tasks[0];
         next_task.task_status = TaskStatus::Running;
+        if next_task.task_launch_time == 0 {
+            next_task.task_launch_time = get_time_ms();
+        }
         let next_task_cx_ptr = &next_task.task_cx as *const TaskContext;
         drop(inner);
         let mut _unused = TaskContext::zero_init();
@@ -140,6 +147,9 @@ impl TaskManager {
             let mut inner = self.inner.exclusive_access();
             let current = inner.current_task;
             inner.tasks[next].task_status = TaskStatus::Running;
+            if inner.tasks[next].task_launch_time == 0 {
+                inner.tasks[next].task_launch_time = get_time_ms();
+            }
             inner.current_task = next;
             let current_task_cx_ptr = &mut inner.tasks[current].task_cx as *mut TaskContext;
             let next_task_cx_ptr = &inner.tasks[next].task_cx as *const TaskContext;
@@ -152,6 +162,132 @@ impl TaskManager {
         } else {
             panic!("All applications completed!");
         }
+    }
+
+    /// 计算程序运行时长
+    fn calc_task_time(&self) -> usize {
+        let inner = self.inner.exclusive_access();
+        let task = &inner.tasks[inner.current_task];
+
+        let launch_time = task.task_launch_time;
+        let current_time = get_time_ms();
+
+        current_time - launch_time
+    }
+
+    /// 获得程序运行状态
+    fn task_status(&self) -> TaskStatus {
+        let inner = self.inner.exclusive_access();
+        let task = &inner.tasks[inner.current_task];
+
+        task.task_status
+    }
+
+    /// 使特定 syscall 的计数加一
+    fn add_task(&self, task_id: usize) {
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        let task = &mut inner.tasks[cur];
+
+        for syscall in &mut task.task_syscall_times {
+            if syscall.id == task_id || syscall.id == 0 {
+                syscall.id = task_id;
+                syscall.times += 1;
+                return;
+            }
+        }
+
+        task.task_syscall_times.push(SyscallInfo {
+            id: task_id,
+            times: 1,
+        });
+    }
+
+    /// 统计所有 syscall 的调用次数
+    fn syscall_statistics(&self, dst: &mut [u32; MAX_SYSCALL_NUM]) {
+        let inner = self.inner.exclusive_access();
+        let task = &inner.tasks[inner.current_task];
+
+        for syscall in &task.task_syscall_times {
+            if syscall.id == 0 {
+                break;
+            }
+            dst[syscall.id] = syscall.times;
+        }
+    }
+
+    /// 校验分配是否合理
+    fn is_mmap_valid(&self, start: usize, end: usize, port: usize) -> bool {
+        if start % PAGE_SIZE != 0 || port & !0x7 != 0 || port & 0x7 == 0 {
+            return false;
+        }
+        let mut start = start;
+        while start < end {
+            if is_mapped(
+                current_user_token(),
+                VirtPageNum::from(VirtAddr::from(start)),
+            ) {
+                return false;
+            }
+            start += PAGE_SIZE;
+        }
+        true
+    }
+
+    /// 校验解分配是否合理
+    fn is_munmap_valid(&self, start: usize, end: usize) -> bool {
+        if start % PAGE_SIZE != 0 {
+            return false;
+        }
+        let mut start = start;
+        while start < end {
+            if !is_mapped(
+                current_user_token(),
+                VirtPageNum::from(VirtAddr::from(start)),
+            ) {
+                return false;
+            }
+            start += PAGE_SIZE;
+        }
+        true
+    }
+
+    /// 申请内存
+    fn mmap(&self, start: usize, end: usize, port: usize) -> isize {
+        if !self.is_mmap_valid(start, end, port) {
+            return -1;
+        }
+        let mut mp = MapPermission::U;
+        if port & (1 << 0) != 0 {
+            mp |= MapPermission::R;
+        }
+        if port & (1 << 1) != 0 {
+            mp |= MapPermission::W;
+        }
+        if port & (1 << 2) != 0 {
+            mp |= MapPermission::X;
+        }
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur].memory_set.insert_framed_area(
+            VirtAddr::from(start),
+            VirtAddr::from(end),
+            mp,
+        );
+        0
+    }
+
+    /// 申请解分配内存
+    fn munmap(&self, start: usize, end: usize) -> isize {
+        if !self.is_munmap_valid(start, end) {
+            return -1;
+        }
+        let mut inner = self.inner.exclusive_access();
+        let cur = inner.current_task;
+        inner.tasks[cur]
+            .memory_set
+            .delete_framed_area(VirtAddr::from(start), VirtAddr::from(end));
+        0
     }
 }
 
@@ -201,4 +337,34 @@ pub fn current_trap_cx() -> &'static mut TrapContext {
 /// Change the current 'Running' task's program break
 pub fn change_program_brk(size: i32) -> Option<usize> {
     TASK_MANAGER.change_current_program_brk(size)
+}
+
+/// 计算程序运行时长
+pub fn calc_task_time() -> usize {
+    TASK_MANAGER.calc_task_time()
+}
+
+/// 获得程序运行状态
+pub fn task_status() -> TaskStatus {
+    TASK_MANAGER.task_status()
+}
+
+/// 使特定 syscall 的计数加一
+pub fn add_syscall_count(task_id: usize) {
+    TASK_MANAGER.add_task(task_id);
+}
+
+/// 统计所有 syscall 的调用次数
+pub fn syscall_statistics(dst: &mut [u32; MAX_SYSCALL_NUM]) {
+    TASK_MANAGER.syscall_statistics(dst);
+}
+
+/// 申请内存
+pub fn mmap(start: usize, end: usize, port: usize) -> isize {
+    TASK_MANAGER.mmap(start, end, port)
+}
+
+/// 申请解分配内存
+pub fn munmap(start: usize, end: usize) -> isize {
+    TASK_MANAGER.munmap(start, end)
 }
