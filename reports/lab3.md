@@ -15,21 +15,21 @@ stride 算法原理非常简单，但是有一个比较大的问题。例如两�
 * 为什么？尝试简单说明（不要求严格证明）。
 * 已知以上结论，考虑溢出的情况下，可以为 Stride 设计特别的比较器，让 BinaryHeap<Stride> 的 pop 方法能返回真正最小的 Stride。补全下列代码中的 `partial_cmp` 函数，假设两个 Stride 永远不会相等。
 
-    use core::cmp::Ordering;
+        use core::cmp::Ordering;
 
-    struct Stride(u64);
+        struct Stride(u64);
 
-    impl PartialOrd for Stride {
-        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-            // ...
+        impl PartialOrd for Stride {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                // ...
+            }
         }
-    }
 
-    impl PartialEq for Stride {
-        fn eq(&self, other: &Self) -> bool {
-            false
+        impl PartialEq for Stride {
+            fn eq(&self, other: &Self) -> bool {
+                false
+            }
         }
-    }
 
 TIPS: 使用 8 bits 存储 stride, BigStride = 255, 则: `(125 < 255) == false`, `(129 < 255) == true`.
 

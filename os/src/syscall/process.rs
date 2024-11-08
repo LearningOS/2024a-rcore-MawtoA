@@ -6,7 +6,9 @@ use crate::{
     loader::get_app_data_by_name,
     mm::{translated_refmut, translated_str},
     syscall::{
-        SYSCALL_EXEC, SYSCALL_EXIT, SYSCALL_FORK, SYSCALL_GETPID, SYSCALL_GET_TIME, SYSCALL_MMAP, SYSCALL_MUNMAP, SYSCALL_SBRK, SYSCALL_TASK_INFO, SYSCALL_WAITPID, SYSCALL_YIELD
+        SYSCALL_EXEC, SYSCALL_EXIT, SYSCALL_FORK, SYSCALL_GETPID, SYSCALL_GET_TIME, SYSCALL_MMAP,
+        SYSCALL_MUNMAP, SYSCALL_SBRK, SYSCALL_SPAWN, SYSCALL_TASK_INFO, SYSCALL_WAITPID,
+        SYSCALL_YIELD,
     },
     task::{
         add_syscall_count, add_task, calc_task_time, current_task, current_user_token, exit_current_and_run_next, mmap, munmap, suspend_current_and_run_next, syscall_statistics, task_status, TaskStatus
@@ -191,12 +193,29 @@ pub fn sys_sbrk(size: i32) -> isize {
 
 /// YOUR JOB: Implement spawn.
 /// HINT: fork + exec =/= spawn
-pub fn sys_spawn(_path: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_spawn NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
-    -1
+pub fn sys_spawn(path: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_spawn", current_task().unwrap().pid.0);
+    add_syscall_count(SYSCALL_SPAWN);
+
+    let name = translated_str(current_user_token(), path);
+    let elf_data = get_app_data_by_name(name.as_str());
+    if let None = elf_data {
+        return -1;
+    }
+
+    let elf_data = elf_data.unwrap();
+    let current_task = current_task().unwrap();
+    let new_task = current_task.spawn(elf_data);
+    let new_pid = new_task.pid.0;
+    // modify trap context of new_task, because it returns immediately after switching
+    let trap_cx = new_task.inner_exclusive_access().get_trap_cx();
+    // we do not have to move to next instruction since we have done it before
+    // for child process, fork returns 0
+    trap_cx.x[10] = 0;
+    // add new task to scheduler
+    add_task(new_task.clone());
+    new_task.exec(elf_data);
+    new_pid as isize
 }
 
 // YOUR JOB: Set task priority.
