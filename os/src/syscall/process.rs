@@ -7,11 +7,13 @@ use crate::{
     mm::{translated_refmut, translated_str},
     syscall::{
         SYSCALL_EXEC, SYSCALL_EXIT, SYSCALL_FORK, SYSCALL_GETPID, SYSCALL_GET_TIME, SYSCALL_MMAP,
-        SYSCALL_MUNMAP, SYSCALL_SBRK, SYSCALL_SPAWN, SYSCALL_TASK_INFO, SYSCALL_WAITPID,
-        SYSCALL_YIELD,
+        SYSCALL_MUNMAP, SYSCALL_SBRK, SYSCALL_SET_PRIORITY, SYSCALL_SPAWN, SYSCALL_TASK_INFO,
+        SYSCALL_WAITPID, SYSCALL_YIELD,
     },
     task::{
-        add_syscall_count, add_task, calc_task_time, current_task, current_user_token, exit_current_and_run_next, mmap, munmap, suspend_current_and_run_next, syscall_statistics, task_status, TaskStatus
+        add_syscall_count, add_task, calc_task_time, current_task, current_user_token,
+        exit_current_and_run_next, mmap, munmap, suspend_current_and_run_next, syscall_statistics,
+        task_status, TaskStatus,
     },
     timer::get_time_us,
 };
@@ -202,7 +204,6 @@ pub fn sys_spawn(path: *const u8) -> isize {
     if let None = elf_data {
         return -1;
     }
-
     let elf_data = elf_data.unwrap();
     let current_task = current_task().unwrap();
     let new_task = current_task.spawn(elf_data);
@@ -219,10 +220,17 @@ pub fn sys_spawn(path: *const u8) -> isize {
 }
 
 // YOUR JOB: Set task priority.
-pub fn sys_set_priority(_prio: isize) -> isize {
+pub fn sys_set_priority(prio: isize) -> isize {
     trace!(
-        "kernel:pid[{}] sys_set_priority NOT IMPLEMENTED",
+        "kernel:pid[{}] sys_set_priority",
         current_task().unwrap().pid.0
     );
-    -1
+    add_syscall_count(SYSCALL_SET_PRIORITY);
+    let current_task = current_task().unwrap();
+    if prio > 1 {
+        current_task.inner_exclusive_access().priority = prio;
+        prio
+    } else {
+        -1
+    }
 }

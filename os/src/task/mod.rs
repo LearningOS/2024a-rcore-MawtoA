@@ -122,7 +122,7 @@ pub fn calc_task_time() -> usize {
     let launch_time = current_task()
         .unwrap()
         .inner_exclusive_access()
-        .task_launch_time;
+        .launch_time;
     let current_time = get_time_ms();
     current_time - launch_time
 }
@@ -136,14 +136,14 @@ pub fn task_status() -> TaskStatus {
 pub fn add_syscall_count(task_id: usize) {
     let task = current_task().unwrap();
     let mut inner = task.inner_exclusive_access();
-    for syscall in &mut inner.task_syscall_times {
+    for syscall in &mut inner.syscalls {
         if syscall.id == task_id || syscall.id == 0 {
             syscall.id = task_id;
             syscall.times += 1;
             return;
         }
     }
-    inner.task_syscall_times.push(SyscallInfo {
+    inner.syscalls.push(SyscallInfo {
         id: task_id,
         times: 1,
     });
@@ -153,7 +153,7 @@ pub fn add_syscall_count(task_id: usize) {
 pub fn syscall_statistics(dst: &mut [u32; MAX_SYSCALL_NUM]) {
     let task = current_task().unwrap();
     let inner = task.inner_exclusive_access();
-    for syscall in &inner.task_syscall_times {
+    for syscall in &inner.syscalls {
         if syscall.id == 0 {
             break;
         }

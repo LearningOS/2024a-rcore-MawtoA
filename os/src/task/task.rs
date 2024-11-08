@@ -83,10 +83,16 @@ pub struct TaskControlBlockInner {
     pub program_brk: usize,
 
     /// 任务首次运行的时间
-    pub task_launch_time: usize,
+    pub launch_time: usize,
 
     /// syscall 调用计数
-    pub task_syscall_times: Vec<SyscallInfo>,
+    pub syscalls: Vec<SyscallInfo>,
+
+    /// 任务 stride
+    pub stride: usize,
+
+    /// 任务优先级
+    pub priority: isize,
 }
 
 impl TaskControlBlockInner {
@@ -137,8 +143,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
-                    task_launch_time: 0,
-                    task_syscall_times: Vec::new(),
+                    launch_time: 0,
+                    syscalls: Vec::new(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -212,8 +220,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
-                    task_launch_time: 0,
-                    task_syscall_times: Vec::new(),
+                    launch_time: 0,
+                    syscalls: Vec::new(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
@@ -255,8 +265,10 @@ impl TaskControlBlock {
                     exit_code: 0,
                     heap_bottom: user_sp,
                     program_brk: user_sp,
-                    task_launch_time: 0,
-                    task_syscall_times: Vec::new(),
+                    launch_time: 0,
+                    syscalls: Vec::new(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
