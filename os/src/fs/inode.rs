@@ -138,6 +138,7 @@ pub fn link_file(oldpath: &str, newpath: &str) -> isize {
 pub fn unlink_file(path: &str) -> isize {
     if let Some(inode) = ROOT_INODE.find(path) {
         if ROOT_INODE.unlink(inode.clone()) == 0 {
+            ROOT_INODE.erase(inode.clone());
             inode.clear();
         }
         0

@@ -196,7 +196,9 @@ impl Inode {
     pub fn links(&self, inode: Arc<Inode>) -> u32 {
         get_block_cache(inode.block_id, Arc::clone(&self.block_device))
             .lock()
-            .read(inode.block_offset, |disk_inode: &DiskInode| disk_inode.links)
+            .read(inode.block_offset, |disk_inode: &DiskInode| {
+                disk_inode.links
+            })
     }
     /// build link of a file
     pub fn link(&self, inode: Arc<Inode>, newpath: &str) {
@@ -233,5 +235,21 @@ impl Inode {
                 disk_inode.links -= 1;
                 disk_inode.links
             })
+    }
+    /// Erase closed inode
+    pub fn erase(&self, inode: Arc<Inode>) {
+        let _fs = self.fs.lock();
+        self.modify_disk_inode(|disk_inode| {
+            let file_count = (disk_inode.size as usize) / DIRENT_SZ;
+            for i in 0..file_count {
+                let mut dirent = DirEntry::empty();
+                disk_inode.read_at(i * DIRENT_SZ, dirent.as_bytes_mut(), &self.block_device);
+                if dirent.inode_id() == inode.id as u32 {
+                    let mut null: Vec<u8> = Vec::new();
+                    null.resize(dirent.as_bytes().len(), 0);
+                    disk_inode.write_at(i * DIRENT_SZ, null.as_slice(), &self.block_device);
+                }
+            }
+        })
     }
 }
