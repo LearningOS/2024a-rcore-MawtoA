@@ -23,7 +23,11 @@ mod switch;
 mod task;
 
 use crate::fs::{open_file, OpenFlags};
-use crate::{config::{MAX_SYSCALL_NUM, PAGE_SIZE}, mm::{is_mapped, MapPermission, VirtAddr, VirtPageNum}, timer::get_time_ms};
+use crate::{
+    config::{MAX_SYSCALL_NUM, PAGE_SIZE},
+    mm::{is_mapped, MapPermission, VirtAddr, VirtPageNum},
+    timer::get_time_ms,
+};
 use alloc::sync::Arc;
 pub use context::TaskContext;
 use lazy_static::*;
@@ -125,10 +129,7 @@ pub fn add_initproc() {
 
 /// 计算程序运行时长
 pub fn calc_task_time() -> usize {
-    let launch_time = current_task()
-        .unwrap()
-        .inner_exclusive_access()
-        .launch_time;
+    let launch_time = current_task().unwrap().inner_exclusive_access().launch_time;
     let current_time = get_time_ms();
     current_time - launch_time
 }

@@ -308,7 +308,9 @@ impl TaskControlBlock {
             },
         });
         // add child
-        self.inner_exclusive_access().children.push(task_control_block.clone());
+        self.inner_exclusive_access()
+            .children
+            .push(task_control_block.clone());
         // prepare TrapContext in user space
         let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
         *trap_cx = TrapContext::app_init_context(
