@@ -192,4 +192,46 @@ impl Inode {
     pub fn id(&self) -> usize {
         self.id
     }
+    /// get inode links
+    pub fn links(&self, inode: Arc<Inode>) -> u32 {
+        get_block_cache(inode.block_id, Arc::clone(&self.block_device))
+            .lock()
+            .read(inode.block_offset, |disk_inode: &DiskInode| disk_inode.links)
+    }
+    /// build link of a file
+    pub fn link(&self, inode: Arc<Inode>, newpath: &str) {
+        let mut fs = self.fs.lock();
+        // create a new file
+        // initialize inode
+        get_block_cache(inode.block_id, Arc::clone(&self.block_device))
+            .lock()
+            .modify(inode.block_offset, |disk_inode: &mut DiskInode| {
+                disk_inode.links += 1;
+            });
+        self.modify_disk_inode(|root_inode| {
+            // append file in the dirent
+            let file_count = (root_inode.size as usize) / DIRENT_SZ;
+            let new_size = (file_count + 1) * DIRENT_SZ;
+            // increase size
+            self.increase_size(new_size as u32, root_inode, &mut fs);
+            // write dirent
+            let dirent = DirEntry::new(newpath, inode.id as u32);
+            root_inode.write_at(
+                file_count * DIRENT_SZ,
+                dirent.as_bytes(),
+                &self.block_device,
+            );
+        });
+        block_cache_sync_all();
+        // release efs lock automatically by compiler
+    }
+    /// remove a link of a file
+    pub fn unlink(&self, inode: Arc<Inode>) -> u32 {
+        get_block_cache(inode.block_id, Arc::clone(&self.block_device))
+            .lock()
+            .modify(inode.block_offset, |disk_inode: &mut DiskInode| {
+                disk_inode.links -= 1;
+                disk_inode.links
+            })
+    }
 }

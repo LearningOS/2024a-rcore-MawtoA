@@ -1,5 +1,5 @@
 //! File and filesystem-related syscalls
-use crate::fs::{open_file, OpenFlags, Stat, StatMode};
+use crate::fs::{link_file, open_file, unlink_file, OpenFlags, Stat, StatMode};
 use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::syscall::*;
 use crate::task::{add_syscall_count, current_task, current_user_token};
@@ -82,14 +82,11 @@ pub fn sys_close(fd: usize) -> isize {
 
 /// YOUR JOB: Implement fstat.
 pub fn sys_fstat(fd: usize, st: *mut Stat) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
+    trace!("kernel:pid[{}] sys_fstat", current_task().unwrap().pid.0);
     add_syscall_count(SYSCALL_FSTAT);
 
     let st = translated_refmut(current_user_token(), st);
-    
+
     let task = current_task().unwrap();
     let inner = task.inner_exclusive_access();
     if fd >= inner.fd_table.len() {
@@ -109,21 +106,27 @@ pub fn sys_fstat(fd: usize, st: *mut Stat) -> isize {
 }
 
 /// YOUR JOB: Implement linkat.
-pub fn sys_linkat(_old_name: *const u8, _new_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_linkat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
+pub fn sys_linkat(old_name: *const u8, new_name: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_linkat", current_task().unwrap().pid.0);
     add_syscall_count(SYSCALL_LINKAT);
-    -1
+
+    let token = current_user_token();
+    let old_name = translated_str(token, old_name);
+    let new_name = translated_str(token, new_name);
+
+    if old_name != new_name {
+        link_file(old_name.as_str(), new_name.as_str())
+    } else {
+        -1
+    }
 }
 
 /// YOUR JOB: Implement unlinkat.
-pub fn sys_unlinkat(_name: *const u8) -> isize {
-    trace!(
-        "kernel:pid[{}] sys_unlinkat NOT IMPLEMENTED",
-        current_task().unwrap().pid.0
-    );
+pub fn sys_unlinkat(name: *const u8) -> isize {
+    trace!("kernel:pid[{}] sys_unlinkat", current_task().unwrap().pid.0);
     add_syscall_count(SYSCALL_UNLINKAT);
-    -1
+
+    let name = translated_str(current_user_token(), name);
+
+    unlink_file(name.as_str())
 }
