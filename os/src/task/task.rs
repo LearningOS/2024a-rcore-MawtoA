@@ -11,6 +11,19 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefMut;
 
+/// 系统调用记录。
+///
+/// 使用结构体短数组的想法和结构体成员的设计受到
+/// [《rCore-Tutorial-Book 第三版》](https://rcore-os.cn/rCore-Tutorial-Book-v3/index.html)
+/// 的启发。
+#[derive(Copy, Clone)]
+pub struct SyscallInfo {
+    /// 调用的 syscall id
+    pub id: usize,
+    /// 总调用次数
+    pub times: u32,
+}
+
 /// Task control block structure
 ///
 /// Directly save the contents that will not change during running
@@ -71,6 +84,18 @@ pub struct TaskControlBlockInner {
 
     /// Program break
     pub program_brk: usize,
+
+    /// 任务首次运行的时间
+    pub launch_time: usize,
+
+    /// syscall 调用计数
+    pub syscalls: Vec<SyscallInfo>,
+
+    /// 任务 stride
+    pub stride: usize,
+
+    /// 任务优先级
+    pub priority: isize,
 }
 
 impl TaskControlBlockInner {
@@ -135,6 +160,10 @@ impl TaskControlBlock {
                     ],
                     heap_bottom: user_sp,
                     program_brk: user_sp,
+                    launch_time: 0,
+                    syscalls: Vec::new(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         };
@@ -165,6 +194,8 @@ impl TaskControlBlock {
         inner.memory_set = memory_set;
         // update trap_cx ppn
         inner.trap_cx_ppn = trap_cx_ppn;
+        // 原本的 exec 函数似乎删除了这一行
+        inner.base_size = user_sp;
         // initialize trap_cx
         let trap_cx = TrapContext::app_init_context(
             entry_point,
@@ -216,6 +247,10 @@ impl TaskControlBlock {
                     fd_table: new_fd_table,
                     heap_bottom: parent_inner.heap_bottom,
                     program_brk: parent_inner.program_brk,
+                    launch_time: 0,
+                    syscalls: Vec::new(),
+                    stride: 0,
+                    priority: 16,
                 })
             },
         });
@@ -229,6 +264,61 @@ impl TaskControlBlock {
         task_control_block
         // **** release child PCB
         // ---- release parent PCB
+    }
+
+    /// parent process spawn the child process
+    pub fn spawn(self: &Arc<Self>, elf_data: &[u8]) -> Arc<Self> {
+        let (memory_set, user_sp, entry_point) = MemorySet::from_elf(elf_data);
+        let trap_cx_ppn = memory_set
+            .translate(VirtAddr::from(TRAP_CONTEXT_BASE).into())
+            .unwrap()
+            .ppn();
+        // alloc a pid and a kernel stack in kernel space
+        let pid_handle = pid_alloc();
+        let kernel_stack = kstack_alloc();
+        let kernel_stack_top = kernel_stack.get_top();
+        let task_control_block = Arc::new(TaskControlBlock {
+            pid: pid_handle,
+            kernel_stack,
+            inner: unsafe {
+                UPSafeCell::new(TaskControlBlockInner {
+                    trap_cx_ppn,
+                    base_size: user_sp,
+                    task_cx: TaskContext::goto_trap_return(kernel_stack_top),
+                    task_status: TaskStatus::Ready,
+                    memory_set,
+                    parent: Some(Arc::downgrade(self)),
+                    children: Vec::new(),
+                    exit_code: 0,
+                    fd_table: vec![
+                        // 0 -> stdin
+                        Some(Arc::new(Stdin)),
+                        // 1 -> stdout
+                        Some(Arc::new(Stdout)),
+                        // 2 -> stderr
+                        Some(Arc::new(Stdout)),
+                    ],
+                    heap_bottom: user_sp,
+                    program_brk: user_sp,
+                    launch_time: 0,
+                    syscalls: Vec::new(),
+                    stride: 0,
+                    priority: 16,
+                })
+            },
+        });
+        // add child
+        self.inner_exclusive_access().children.push(task_control_block.clone());
+        // prepare TrapContext in user space
+        let trap_cx = task_control_block.inner_exclusive_access().get_trap_cx();
+        *trap_cx = TrapContext::app_init_context(
+            entry_point,
+            user_sp,
+            KERNEL_SPACE.exclusive_access().token(),
+            kernel_stack_top,
+            trap_handler as usize,
+        );
+        task_control_block
     }
 
     /// get pid of process
