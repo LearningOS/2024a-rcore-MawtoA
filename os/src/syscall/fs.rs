@@ -1,6 +1,6 @@
 //! File and filesystem-related syscalls
-use crate::fs::{open_file, OpenFlags, Stat};
-use crate::mm::{translated_byte_buffer, translated_str, UserBuffer};
+use crate::fs::{open_file, OpenFlags, Stat, StatMode};
+use crate::mm::{translated_byte_buffer, translated_refmut, translated_str, UserBuffer};
 use crate::syscall::*;
 use crate::task::{add_syscall_count, current_task, current_user_token};
 
@@ -81,13 +81,31 @@ pub fn sys_close(fd: usize) -> isize {
 }
 
 /// YOUR JOB: Implement fstat.
-pub fn sys_fstat(_fd: usize, _st: *mut Stat) -> isize {
+pub fn sys_fstat(fd: usize, st: *mut Stat) -> isize {
     trace!(
         "kernel:pid[{}] sys_fstat NOT IMPLEMENTED",
         current_task().unwrap().pid.0
     );
     add_syscall_count(SYSCALL_FSTAT);
-    -1
+
+    let st = translated_refmut(current_user_token(), st);
+    
+    let task = current_task().unwrap();
+    let inner = task.inner_exclusive_access();
+    if fd >= inner.fd_table.len() {
+        return -1;
+    }
+    if inner.fd_table[fd].is_none() {
+        return -1;
+    }
+
+    let file = inner.fd_table[fd].as_ref().unwrap();
+    st.dev = 0;
+    st.ino = file.id() as u64;
+    st.mode = StatMode::FILE;
+    st.nlink = file.links() as u32;
+
+    0
 }
 
 /// YOUR JOB: Implement linkat.

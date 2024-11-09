@@ -155,4 +155,10 @@ impl File for OSInode {
         }
         total_write_size
     }
+    fn id(&self) -> usize {
+        self.inner.exclusive_access().inode.id()
+    }
+    fn links(&self) -> usize {
+        1
+    }
 }
