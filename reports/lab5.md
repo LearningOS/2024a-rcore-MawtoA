@@ -1,37 +1,53 @@
-## Chapter8 实验报告
-
-这是一篇占位文件。剩下的部分将在编程作业完成后补充。
+## Chapter5 实验报告
 
 ### 功能实现
 
-### 简答部分
+本次实验中，我通过观察并组合 fork 和 exec 的部分功能实现了“新地址空间下执行进程”的 spawn 功能；同时通过修改 `TaskControlBlock` 和 `TaskControlBlockInner` 并补充了辅助函数，完成了 stride 调度。
 
-1. 在我们的多线程实现中，当主线程 (即 0 号线程) 退出时，视为整个进程退出， 此时需要结束该进程管理的所有线程并回收其资源。 - 需要回收的资源有哪些？ - 其他线程的 TaskControlBlock 可能在哪些位置被引用，分别是否需要回收，为什么？
+### 简答部分 - stride 算法深入
 
-2. 对比以下两种 Mutex.`unlock` 的实现，二者有什么区别？这些区别可能会导致什么问题？
+stride 算法原理非常简单，但是有一个比较大的问题。例如两个 pass = 10 的进程，使用 8bit 无符号整形储存 stride， p1.stride = 255, p2.stride = 250，在 p2 执行一个时间片后，理论上下一次应该 p1 执行。
 
-        impl Mutex for Mutex1 {
-            fn unlock(&self) {
-                let mut mutex_inner = self.inner.exclusive_access();
-                assert!(mutex_inner.locked);
-                mutex_inner.locked = false;
-                if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
-                    add_task(waking_task);
-                }
-            }
-        }
+* 实际情况是轮到 p1 执行吗？为什么？
 
-        impl Mutex for Mutex2 {
-            fn unlock(&self) {
-                let mut mutex_inner = self.inner.exclusive_access();
-                assert!(mutex_inner.locked);
-                if let Some(waking_task) = mutex_inner.wait_queue.pop_front() {
-                    add_task(waking_task);
+    不一定，由于 8bit 无符号整型可表示的范围在 0~255 之间，一旦 `BIG_STRIDE >= 60`，那么 p2.stride 会由于整型上溢变为一个小于等于 255 的值，此时算法很可能会认为 p2.stride < p1.stride 从而继续先执行 p2。
+
+我们之前要求进程优先级 >= 2 其实就是为了解决这个问题。可以证明， 在不考虑溢出的情况下 , 在进程优先级全部 >= 2 的情况下，如果严格按照算法执行，那么 STRIDE_MAX – STRIDE_MIN <= BigStride / 2。
+
+* 为什么？尝试简单说明（不要求严格证明）。
+
+    由于进程优先级 >= 2，每次调度后进程优先级增量都不会超过“BigStride / 2”。而由于 stride 调度算法总是先执行 stride 值小的进程，在 STRIDE_MIN 超过 STRIDE_MAX 之前两者之差不会再度增大，而 STRIDE_MIN 也不可能一次就增加到大于 STRIDE_MAX + BigStride / 2，因此上述式子成立。
+
+* 已知以上结论，考虑溢出的情况下，可以为 Stride 设计特别的比较器，让 BinaryHeap<Stride> 的 pop 方法能返回真正最小的 Stride。补全下列代码中的 `partial_cmp` 函数，假设两个 Stride 永远不会相等。
+
+        use core::cmp::Ordering;
+
+        struct Stride(u64);
+
+        impl PartialOrd for Stride {
+            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+                let (smaller, bigger) = if self.0 < other.0 {
+                    (self.0, other.0)
                 } else {
-                    mutex_inner.locked = false;
+                    (other.0, self.0)
+                };
+                let diff = bigger - smaller;
+                let max_diff = BIG_STRIDE / 2;
+                if self.0 < other.0 && diff <= max_diff || self.0 > other.0 && diff > max_diff {
+                    Sone(Ordering::Less)
+                } else {
+                    Sone(Ordering::Greater)
                 }
             }
         }
+
+        impl PartialEq for Stride {
+            fn eq(&self, other: &Self) -> bool {
+                false
+            }
+        }
+
+TIPS: 使用 8 bits 存储 stride, BigStride = 255, 则: `(125 < 255) == false`, `(129 < 255) == true`.
 
 ### 荣誉准则
 
