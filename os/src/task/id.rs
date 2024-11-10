@@ -79,6 +79,7 @@ pub fn kernel_stack_position(kstack_id: usize) -> (usize, usize) {
     (bottom, top)
 }
 
+#[derive(Debug)]
 /// Kernel stack for a task
 pub struct KernelStack(pub usize);
 

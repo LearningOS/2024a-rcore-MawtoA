@@ -2,10 +2,12 @@
 
 use super::id::TaskUserRes;
 use super::{kstack_alloc, KernelStack, ProcessControlBlock, TaskContext};
+use crate::sync::{MutexBlocking, Semaphore};
 use crate::trap::TrapContext;
 use crate::{mm::PhysPageNum, sync::UPSafeCell};
 use alloc::sync::{Arc, Weak};
-use core::cell::RefMut;
+use alloc::vec::Vec;
+use core::cell::{Ref, RefMut};
 
 /// Task control block structure
 pub struct TaskControlBlock {
@@ -21,6 +23,10 @@ impl TaskControlBlock {
     /// Get the mutable reference of the inner TCB
     pub fn inner_exclusive_access(&self) -> RefMut<'_, TaskControlBlockInner> {
         self.inner.exclusive_access()
+    }
+    /// get the immutable ref of inner tcb
+    pub fn inner_const_access(&self) -> Ref<'_, TaskControlBlockInner> {
+        self.inner.const_access()
     }
     /// Get the address of app's page table
     pub fn get_user_token(&self) -> usize {
@@ -41,6 +47,10 @@ pub struct TaskControlBlockInner {
     pub task_status: TaskStatus,
     /// It is set when active exit or execution error occurs
     pub exit_code: Option<i32>,
+    /// block mutex list
+    pub block_mutex_list: Vec<Option<Arc<MutexBlocking>>>,
+    /// need for semas
+    pub sema_list: Vec<Option<Weak<Semaphore>>>,
 }
 
 impl TaskControlBlockInner {
@@ -75,6 +85,8 @@ impl TaskControlBlock {
                     task_cx: TaskContext::goto_trap_return(kstack_top),
                     task_status: TaskStatus::Ready,
                     exit_code: None,
+                    block_mutex_list: Vec::new(),
+                    sema_list: Vec::new(),
                 })
             },
         }
