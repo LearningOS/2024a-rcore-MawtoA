@@ -1,37 +1,90 @@
-## Chapter5 实验报告
-
-这是一篇占位文件。剩下的部分将在编程作业完成后补充。
+## Chapter3 实验报告
 
 ### 功能实现
 
-### 简答部分 - stride 算法深入
+本次实验中，我扩展了 `TaskControlBlock` ，添加表示任务首次运行时间和系统调用情况的属性，并在 `task` 模块中中添加了记录开始时运行时间的指令，编写了更新和获得 `task_info` 三个成员所需的函数并添加到系统指令实现中。通过以上修改，本系统现在可以查询当前正在执行的任务信息，包括任务状态、使用的系统调用及调用次数、系统调用距任务第一次被调度时刻的时长。
 
-stride 算法原理非常简单，但是有一个比较大的问题。例如两个 pass = 10 的进程，使用 8bit 无符号整形储存 stride， p1.stride = 255, p2.stride = 250，在 p2 执行一个时间片后，理论上下一次应该 p1 执行。
+### 简答部分
 
-* 实际情况是轮到 p1 执行吗？为什么？
+1. 正确进入 U 态后，程序的特征还应有：使用 S 态特权指令，访问 S 态寄存器后会报错。请同学们可以自行测试这些内容（运行 三个 bad 测例 (ch2b_bad_*.rs) ），描述程序出错行为，同时注意注明你使用的 sbi 及其版本。
 
-我们之前要求进程优先级 >= 2 其实就是为了解决这个问题。可以证明， 在不考虑溢出的情况下 , 在进程优先级全部 >= 2 的情况下，如果严格按照算法执行，那么 STRIDE_MAX – STRIDE_MIN <= BigStride / 2。
+    使用 RustSBI version 0.3.0-alpha.2 (QEMU Version 0.2.0-alpha.2) 对上述测例进行测试。
 
-* 为什么？尝试简单说明（不要求严格证明）。
-* 已知以上结论，考虑溢出的情况下，可以为 Stride 设计特别的比较器，让 BinaryHeap<Stride> 的 pop 方法能返回真正最小的 Stride。补全下列代码中的 `partial_cmp` 函数，假设两个 Stride 永远不会相等。
+    1. 运行 `ch2b_bad_address` 时，系统中止了该程序运行并向控制台打印了如下错误信息：
 
-        use core::cmp::Ordering;
+            [kernel] PageFault in application, bad addr = 0x0, bad instruction = 0x804003c8, kernel killed it.
 
-        struct Stride(u64);
+        分析源代码可以确定，用户程序尝试向地址为 `0x0` 的内存写入数据，触发了储存错误异常并 Trap 使程序提前退出（因此源代码中的 panic 代码没有执行）。
 
-        impl PartialOrd for Stride {
-            fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-                // ...
-            }
-        }
+    2. 运行 `ch2b_bad_instructions` 时，系统中止了该程序运行并向控制台打印了如下错误信息：
 
-        impl PartialEq for Stride {
-            fn eq(&self, other: &Self) -> bool {
-                false
-            }
-        }
+            [kernel] IllegalInstruction in application, kernel killed it.
 
-TIPS: 使用 8 bits 存储 stride, BigStride = 255, 则: `(125 < 255) == false`, `(129 < 255) == true`.
+        分析源代码可以确定，用户程序尝试在 U 态下执行 S 态特权指令 `sret`，触发了非法指令异常并 Trap 使程序提前退出。
+
+    3. 运行 `ch2b_bad_register` 时系统的表现与运行 `ch2b_bad_instructions` 时非常相似，不过触发非法指令异常的原因是用户程序尝试在 U 态下通过 `csrr` 指令读取 S 态寄存器 `sstatus` 中的值。
+
+2. 深入理解 trap.S 中两个函数 `__alltraps` 和 `__restore` 的作用，并回答如下问题:
+
+    1. L40：刚进入 `__restore` 时，`a0` 代表了什么值。请指出 `__restore` 的两种使用情景。
+
+        `a0` 代表的是 `__alltraps` 执行中栈顶指针 `sp` 的值，即内核栈栈顶。
+
+        使用情形：
+
+        1. 用户程序产生错误，系统在处理完错误后通过切换到下一个任务并通过 `__restore` 函数将特权级切换回用户态，供下一个任务执行。
+        2. 用户发起系统调用申请，系统在响应完毕请求后通过 `__restore` 函数恢复用户任务堆栈并恢复任务执行。
+
+    2. L43-L48：这几行汇编代码特殊处理了哪些寄存器？这些寄存器的的值对于进入用户态有何意义？请分别解释。
+
+            ld t0, 32*8(sp)
+            ld t1, 33*8(sp)
+            ld t2, 2*8(sp)
+            csrw sstatus, t0
+            csrw sepc, t1
+            csrw sscratch, t2
+        
+        特殊处理的寄存器包括 `sstatus` `sepc   ` 和 `sscratch`。它们分别承担以下功能：
+
+        * `sstatus` 反映 S 态下处理器的工作状态，在这里最重要的功能是记录 Trap 发生之前 CPU 的特权级等信息；
+        * `sepc` 记录 Trap 发生之前执行的最后一条指令的地址；
+        * `sscratch` 是一个用于储存地址的中转寄存器，`__alltraps` 开始时储存有内核栈的地址。
+
+        这些寄存器能够帮助程序回到 U 态时为用户任务恢复正确的上下文。
+
+    3. L50-L56：为何跳过了 `x2` 和 `x4`？
+
+            ld x1, 1*8(sp)
+            ld x3, 3*8(sp)
+            .set n, 5
+            .rept 27
+            LOAD_GP %n
+            .set n, n+1
+            .endr
+        
+        跳过 `x2` 是因为 `x2(sp)` 指针需要用来保存其它通用寄存器，需要最后再储存（实际上此时的 `x2` 也不是用户栈的栈顶指针）；
+
+        跳过 `x4` 是因为 `x4(tp)` 是线程寄存器，当前的程序还不需要使用它。
+
+    4. L60：该指令之后，`sp` 和 `sscratch` 中的值分别有什么意义？
+
+            csrrw sp, sscratch, sp
+
+        该指令之后，`sp` 的值即为用户任务的栈顶地址，`sscratch` 的值为内核栈的栈顶地址（已经不再需要使用）。
+
+    5. `__restore`：中发生状态切换在哪一条指令？为何该指令执行之后会进入用户态？
+
+        是在 L61: `sret` 切换的，因为该指令能将当前的特权级设置为 U。
+
+    6. L13：该指令之后，`sp` 和 `sscratch` 中的值分别有什么意义？
+
+            csrrw sp, sscratch, sp
+
+        该指令之后，`sp` 的值为核栈的栈顶地址，`sscratch` 的值为用户任务的栈顶地址。
+
+    7. 从 U 态进入 S 态是哪一条指令发生的？
+
+        在 `__alltraps` 之前特权级就已经完成转换了。
 
 ### 荣誉准则
 
