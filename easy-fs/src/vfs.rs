@@ -8,6 +8,9 @@ use alloc::vec::Vec;
 use spin::{Mutex, MutexGuard};
 /// Virtual filesystem layer over easy-fs
 pub struct Inode {
+    /// 原本的 id 设计通过 block_id 和 block_offset 反推。
+    /// 
+    /// 上述想法受到了微信群友 hatachi 和 Dynamic_Pigeon 讨论的启发。
     id: usize,
     block_id: usize,
     block_offset: usize,
